@@ -207,7 +207,13 @@ class Attention(nn.Module):
         super().__init__()
         # 1. 头数和每头维度
         self.n_local_heads = args.num_attention_heads  # 总头数
-        self.num_key_value_heads = args.num_key_value_heads if args.num_key_value_heads is not None else args.num_attention_heads  # KV头数
+
+        self.num_key_value_heads = (
+            args.num_attention_heads  # 如果没有指定 num_key_value_heads，就等于 num_attention_heads
+            if args.num_key_value_heads is not None 
+            else args.num_key_value_heads  # 指定了用则用指定的值
+        )
+
         self.head_dim = args.hidden_size // args.num_attention_heads  # 每头维度
         self.n_rep = self.n_local_heads // self.num_key_value_heads  # 重复次数
 
@@ -397,6 +403,8 @@ class CoconutMindBlock(nn.Module):
 class CoconutMindModel(nn.Module):
     def __init__(self, args: CoconutMindConfig):
         super().__init__()
+        # 需要初始化 config
+        self.config = args
         # 取出词表大小和中间层大小
         self.vocab_size, self.num_hidden_layers = (
             args.vocab_size,
@@ -494,10 +502,6 @@ class CoconutMindForCausalLM(PreTrainedModel, GenerationMixin):
         # 输出层和输入层共享权重
         self.model.embed_tokens.weight = self.lm_head.weight
 
-        # 定义输出
-        # CausalLMOutputWithPast 是 transformers 提供的一个标准输出类，包含了语言模型常用的输出项
-        self.OUT = CausalLMOutputWithPast()
-
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -533,7 +537,13 @@ class CoconutMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.OUT.__setitem__('logits', logits)
         self.OUT.__setitem__('past_key_values', past_key_values)
 
-        return self.OUT
+        # 定义输出
+        # CausalLMOutputWithPast 是 transformers 提供的一个标准输出类，包含了语言模型常用的输出项
+        return CausalLMOutputWithPast(
+            logits=logits,
+            past_key_values=past_key_values,
+            hidden_states=hidden_states,
+        )
     
     # 这里输出的 OUT 会再经过 tokenizer 的 decoder 变成文本
     # softmax 一般在 loss function 里计算，可以实现数值稳定性更好的交叉熵计算
