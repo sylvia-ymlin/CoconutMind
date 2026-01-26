@@ -1,3 +1,4 @@
+import math
 from transformers import PretrainedConfig
 
 '''
@@ -106,3 +107,76 @@ class RMSNorm(nn.Module):
     # forward
     def forward(self, x: torch.Tensor):
         return x * self._norm(x) * self.weight
+
+
+# 实现 RoPE 编码  
+def precompute_freqs_cis(
+    dim: int,
+    end: int,
+    rope_theta: int = 1000000, # base，最大频率
+    rope_scaling: dict = None,
+):
+    # 1. 写出 RoPE 的数学公式
+    # 2. 计算 corr_dim
+    # 3. 计算 beta
+    # 4. 计算 scale
+    # 5. 应用 scale
+    # 6. 返回一个 cos 和 sin
+
+    # 1. 写出 RoPE 的数学公式
+    freqs = 1.0 / (
+        rope_theta ** (torch.arange(0, dim, 2).float() / dim)
+    )  # (dim/2,) # 计算每个维度对应的频率
+
+    if rope_scaling is not None:
+        # 取出 rope_scaling 的参数
+        orig_max, factor, beta_fast, beta_slow = (
+            rope_scaling.get("original_max_position_embeddings", 2048), # 没有就给默认值2048
+            rope_scaling.get("factor", 4),
+            rope_scaling.get("beta_fast", 4),
+            rope_scaling.get("beta_slow", 1),
+        )
+        # 2. 计算 corr_dim
+        corr_dim = next((i for i in range(dim//2) if 2 * math.pi/freqs[i] > orig_max), dim//2)
+        # 上述代码的含义是，如果没有超过 orig_max, 就是 pure rope，否则需要插值压缩 
+
+        # 3. 计算 power： for rope scaling
+        power = torch.arange(0, dim//2, device=freqs.device).float() / (max(dim//2 -1, 1))
+
+        # 4. 计算 beta
+        beta = beta_slow + (beta_fast - beta_slow) * power
+
+        # 5. 计算 scale
+        scale = torch.where(
+            torch.arange(0, dim//2, device=freqs.device) < corr_dim,
+            (beta * factor - beta + 1) / (beta * factor), # 高频插值
+            1.0/factor,  # 低频压缩
+        )
+
+        # 6. 应用 scale
+        freqs = freqs * scale
+
+    # 7. 生成位置索引，并计算 freqs * pos，找到对应位置的角度
+    t = torch.arange(end, device=freqs.device)
+    freqs = torch.outer(t, freqs).float()  # 外积计算
+
+    # 8. 返回一个 cos 和 sin
+    # 需要扩一倍 -> 因为 cos 和 sin 交替出现
+    freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)  # (end, dim)
+    freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)  # (end, dim)
+
+    return freqs_cos, freqs_sin
+
+def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim = 1):
+    
+    # 复数在实数域上的旋转
+    def rotate_half(x):
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2 :]
+        return torch.cat([-x2, x1], dim=-1)
+
+    # x_roated = x * cos + rotate_half(x) * sin
+    q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q) * sin.unsqueeze(unsqueeze_dim))
+    k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k) * sin.unsqueeze(unsqueeze_dim))
+
+    return q_embed, k_embed
