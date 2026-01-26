@@ -73,3 +73,36 @@ class CoconutMindConfig(PretrainedConfig):
             if self.inference_rope_scaling
             else None
         )
+
+
+import torch
+import torch.nn as nn
+
+# Basic structure
+
+# hesitate nn.Module class
+class RMSNorm(nn.Module):
+# __init__ initialization
+    def __init__(self, dim: int, eps: float=1e-5): # two parameters
+        super().__init__() # we need to initialize the parent class first
+        self.dim = dim
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim)) # weight -> gammar, a learnable parameter
+
+    '''
+    假设输入 x 的 shape 是 (batch, seq_len, dim)
+    x.pow(2).mean(-1, keepdim=True)，在最后一个维度上做均方，并保留最后一个维度，即 (batch, seq_len, 1)
+    add(self.eps) 和 rsqrt() 都不会改变 shape
+
+    在 forward 中，x * self._norm(x) 利用了 PyTorch 的广播机制，把 (batch, seq_len, 1) 自动扩展为 (batch, seq_len, dim)，实现每个 token 的所有 feature 都除以同一个归一化因子。
+    '''
+
+    # _norm
+    def _norm(self, x: torch.Tensor):
+        # 均方和 + eps 求倒数
+        # an util function
+        return x.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
+
+    # forward
+    def forward(self, x: torch.Tensor):
+        return x * self._norm(x) * self.weight
