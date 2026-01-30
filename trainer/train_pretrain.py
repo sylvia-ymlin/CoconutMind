@@ -89,15 +89,15 @@ def train_epoch(epoch, loader, total_steps, start_step=0, wandb=None):
             optimizer.zero_grad(set_to_none=True)  # 清空梯度, 设置为 None 以节省内存
 
         # 日志
-        if step % args.log_interval == 0 or step == iters - 1:
+        if step % args.log_interval == 0 or step == total_steps - 1:
             spend_time = time.time() - start_time
             current_loss = loss.item() * args.accumulation_steps  # 恢复真实损失值
             current_lr = optimizer.param_groups[-1]["lr"]  # 当前学习率
 
-            eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
+            eta_min = spend_time / (step + 1) * total_steps // 60 - spend_time // 60
 
             Logger(
-                f"Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}) loss:{current_loss:.6f} lr:{current_lr:.12f} epoch_Time:{eta_min}min:"
+                f"Epoch:[{epoch + 1}/{args.epochs}]({step}/{total_steps}) loss:{current_loss:.6f} lr:{current_lr:.12f} epoch_Time:{eta_min}min:"
             )
 
             # 记录到实验跟踪系统
@@ -108,7 +108,7 @@ def train_epoch(epoch, loader, total_steps, start_step=0, wandb=None):
         
 
         # test
-        if (step % args.save_interval == 0 or step == iters - 1) and is_main_process():
+        if (step % args.save_interval == 0 or step == total_steps - 1) and is_main_process():
             model.eval()  # 切换到评估模式
 
             # 构建保存路径
